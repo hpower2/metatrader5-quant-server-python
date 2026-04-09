@@ -1,1 +1,1 @@
-/scripts/01-start.sh
+/usr/bin/xterm -fa Monospace -fs 11 -geometry 140x36+20+20 -title "MT5 Startup" -e /bin/bash -lc "/scripts/01-start.sh" &

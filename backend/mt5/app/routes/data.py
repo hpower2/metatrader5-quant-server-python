@@ -10,6 +10,23 @@ from lib import get_timeframe
 data_bp = Blueprint('data', __name__)
 logger = logging.getLogger(__name__)
 
+
+def _parse_mt5_datetime(value: str) -> datetime:
+    """
+    Preferred wire format: YYYY-MM-DDTHH-mm-ss
+    Backward compatibility: ISO-8601 strings with ':' and optional timezone.
+    """
+    utc = pytz.UTC
+    try:
+        parsed = datetime.strptime(value, "%Y-%m-%dT%H-%M-%S")
+        return utc.localize(parsed)
+    except ValueError:
+        parsed = datetime.fromisoformat(value.replace('Z', '+00:00'))
+        if parsed.tzinfo is None:
+            return utc.localize(parsed)
+        return parsed.astimezone(utc)
+
+
 @data_bp.route('/fetch_data_pos', methods=['GET'])
 @swag_from({
     'tags': ['Data'],
@@ -184,10 +201,9 @@ def fetch_data_range_endpoint():
 
         mt5_timeframe = get_timeframe(timeframe)
         
-        # Convert string dates to datetime objects
-        utc = pytz.UTC
-        start_date = utc.localize(datetime.fromisoformat(start_str.replace('Z', '+00:00')))
-        end_date = utc.localize(datetime.fromisoformat(end_str.replace('Z', '+00:00')))
+        # Preferred incoming format: YYYY-MM-DDTHH-mm-ss
+        start_date = _parse_mt5_datetime(start_str)
+        end_date = _parse_mt5_datetime(end_str)
         
         rates = mt5.copy_rates_range(symbol, mt5_timeframe, start_date, end_date)
         if rates is None:

@@ -30,16 +30,18 @@ SECRET_KEY = 'django-insecure-%j5tpuhd$lvp23tt+bszj2(xc=b(0o#@h4#r5ty1i5tog8=cmu
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = [os.getenv('DJANGO_DOMAIN'), 'localhost', '127.0.0.1', 'example.com', 'django']
+DJANGO_DOMAIN = os.getenv('DJANGO_DOMAIN', 'django.irvine.web.id')
+
+ALLOWED_HOSTS = [DJANGO_DOMAIN, 'localhost', '127.0.0.1', 'django']
 
 CSRF_TRUSTED_ORIGINS = [
-    f"https://{os.getenv('DJANGO_DOMAIN')}",
-    f"http://{os.getenv('DJANGO_DOMAIN')}",
+    f"https://{DJANGO_DOMAIN}",
+    f"http://{DJANGO_DOMAIN}",
 ]
 
 # If you need to debug CSRF issues, you can temporarily add:
 CSRF_COOKIE_SECURE = True
-CSRF_COOKIE_DOMAIN = os.getenv('DJANGO_DOMAIN')
+CSRF_COOKIE_DOMAIN = DJANGO_DOMAIN
 SESSION_COOKIE_SECURE = True
 
 LOGGING = {

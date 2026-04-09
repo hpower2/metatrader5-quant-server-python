@@ -8,12 +8,51 @@ python_url="https://www.python.org/ftp/python/3.9.13/python-3.9.13-amd64.exe"
 wine_executable="wine"
 metatrader_version="5.0.36"
 mt5server_port=18812
+mt5_log_file="/config/mt5_setup.log"
 
 # Function to show messages
 log_message() {
     local level=$1
     local message=$2
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - [$level] $message" >> /var/log/mt5_setup.log
+    local formatted_message
+    formatted_message="$(date '+%Y-%m-%d %H:%M:%S') - [$level] $message"
+    echo "$formatted_message" | tee -a "$mt5_log_file" >/dev/null
+}
+
+resolve_mt5_file() {
+    local detected_mt5file
+
+    if [ -f "$mt5file" ]; then
+        echo "$mt5file"
+        return 0
+    fi
+
+    detected_mt5file=$(find /config/.wine/drive_c -type f \( -iname 'terminal64.exe' -o -iname 'terminal.exe' \) \
+        -path '*/MetaTrader 5/*' 2>/dev/null | head -n 1)
+
+    if [ -n "$detected_mt5file" ]; then
+        mt5file="$detected_mt5file"
+        echo "$mt5file"
+        return 0
+    fi
+
+    return 1
+}
+
+has_webview2_runtime() {
+    find /config/.wine/drive_c -type f -path '*/Microsoft/EdgeWebView/Application/*/msedgewebview2.exe' \
+        2>/dev/null | grep -q .
+}
+
+wait_for_wineserver() {
+    local timeout_seconds="${1:-120}"
+
+    if timeout "$timeout_seconds" wineserver -w; then
+        return 0
+    fi
+
+    log_message "WARN" "wineserver -w timed out after ${timeout_seconds}s; continuing startup."
+    return 1
 }
 
 # Function to check if a Python package is installed in Wine

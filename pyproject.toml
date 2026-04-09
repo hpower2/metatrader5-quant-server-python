@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mt5-quant-platform"
+version = "0.1.0"
+description = "Production-grade quant research and paper-trading pipeline around an MT5 HTTP API."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "alembic>=1.14.1",
+    "fastapi>=0.115.0",
+    "httpx>=0.28.1",
+    "numpy>=2.2.0",
+    "pandas>=2.2.3",
+    "psycopg[binary]>=3.2.3",
+    "pyarrow>=18.1.0",
+    "pydantic>=2.10.3",
+    "pydantic-settings>=2.6.1",
+    "python-dateutil>=2.9.0.post0",
+    "python-json-logger>=3.2.1",
+    "sqlalchemy>=2.0.36",
+    "structlog>=24.4.0",
+    "tenacity>=9.0.0",
+    "typer>=0.15.1",
+    "uvicorn[standard]>=0.34.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.4",
+    "pytest-cov>=6.0.0",
+    "pytest-mock>=3.14.0",
+    "respx>=0.22.0",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["apps*", "libs*"]
+

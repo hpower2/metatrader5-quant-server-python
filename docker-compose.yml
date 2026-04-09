@@ -27,11 +27,11 @@ services:
 
       # HTTP router configuration
       traefik.http.routers.traefik-dashboard-http.entrypoints: http
-      traefik.http.routers.traefik-dashboard-http.rule: Host(`${TRAEFIK_DOMAIN:-traefik.localhost}`)
+      traefik.http.routers.traefik-dashboard-http.rule: Host(`${TRAEFIK_DOMAIN:-traefik.irvine.web.id}`)
 
       # HTTPS router configuration
       traefik.http.routers.traefik-dashboard-https.entrypoints: https
-      traefik.http.routers.traefik-dashboard-https.rule: Host(`${TRAEFIK_DOMAIN:-traefik.localhost}`)
+      traefik.http.routers.traefik-dashboard-https.rule: Host(`${TRAEFIK_DOMAIN:-traefik.irvine.web.id}`)
       traefik.http.routers.traefik-dashboard-https.tls: true
       traefik.http.routers.traefik-dashboard-https.tls.certresolver: le
       traefik.http.routers.traefik-dashboard-https.service: api@internal
@@ -46,7 +46,7 @@ services:
       traefik.http.routers.traefik-dashboard-https.middlewares: admin-auth
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro # Docker socket for reading service labels
-      - traefik-public-certificates:/certificates # Certificate storage
+      - ${SHARED_VOLUME_ROOT:-/mnt/shared/mt5}/traefik/letsencrypt:/letsencrypt # ACME certificate storage
     command:
       # Docker provider configuration
       - --providers.docker
@@ -58,8 +58,9 @@ services:
 
       # Let's Encrypt configuration
       - --certificatesresolvers.le.acme.email=${ACME_EMAIL:-admin@example.com}
-      - --certificatesresolvers.le.acme.storage=/certificates/acme.json
-      - --certificatesresolvers.le.acme.tlschallenge=true
+      - --certificatesresolvers.le.acme.storage=/letsencrypt/acme.json
+      - --certificatesresolvers.le.acme.caserver=${ACME_CA_SERVER:-https://acme-v02.api.letsencrypt.org/directory}
+      - --certificatesresolvers.le.acme.httpchallenge.entrypoint=http
 
       # Logging and API configuration
       - --accesslog
@@ -90,12 +91,13 @@ services:
       traefik.enable: true
       traefik.docker.network: traefik-public
 
-      # Router for vnc.mt5.${domain} (Port 3000)
-      traefik.http.routers.vnc-mt5-http.rule: Host(`${VNC_DOMAIN:-vnc.mt5.localhost}`)
+      # Router for vnc-mt5.irvine.web.id (Port 3000)
+      traefik.http.routers.vnc-mt5-http.rule: Host(`${VNC_DOMAIN:-vnc-mt5.irvine.web.id}`)
       traefik.http.routers.vnc-mt5-http.entrypoints: http
       traefik.http.routers.vnc-mt5-http.middlewares: https-redirect
+      traefik.http.routers.vnc-mt5-http.service: vnc-mt5-service
 
-      traefik.http.routers.vnc-mt5-https.rule: Host(`${VNC_DOMAIN:-vnc.mt5.localhost}`)
+      traefik.http.routers.vnc-mt5-https.rule: Host(`${VNC_DOMAIN:-vnc-mt5.irvine.web.id}`)
       traefik.http.routers.vnc-mt5-https.entrypoints: https
       traefik.http.routers.vnc-mt5-https.tls: true
       traefik.http.routers.vnc-mt5-https.tls.certresolver: le
@@ -103,12 +105,13 @@ services:
 
       traefik.http.services.vnc-mt5-service.loadbalancer.server.port: 3000
 
-      # Router for api.mt5.${domain} (Port 5001)
-      traefik.http.routers.api-mt5-http.rule: Host(`${API_DOMAIN:-api.mt5.localhost}`)
+      # Router for api-mt5.irvine.web.id (Port 5001)
+      traefik.http.routers.api-mt5-http.rule: Host(`${API_DOMAIN:-api-mt5.irvine.web.id}`)
       traefik.http.routers.api-mt5-http.entrypoints: http
       traefik.http.routers.api-mt5-http.middlewares: https-redirect
+      traefik.http.routers.api-mt5-http.service: api-mt5-service
 
-      traefik.http.routers.api-mt5-https.rule: Host(`${API_DOMAIN:-api.mt5.localhost}`)
+      traefik.http.routers.api-mt5-https.rule: Host(`${API_DOMAIN:-api-mt5.irvine.web.id}`)
       traefik.http.routers.api-mt5-https.entrypoints: https
       traefik.http.routers.api-mt5-https.tls: true
       traefik.http.routers.api-mt5-https.tls.certresolver: le
@@ -120,17 +123,26 @@ services:
       - traefik
 
   postgres:
-    image: postgres:15-alpine
+    image: timescale/timescaledb:2.17.2-pg15
     container_name: postgres
     restart: unless-stopped
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=timescaledb
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-postgres}
       POSTGRES_USER: ${POSTGRES_USER:-admin}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-1234}
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      - ${SHARED_VOLUME_ROOT:-/mnt/shared/mt5}/postgres/data:/var/lib/postgresql/data
     networks:
       - default
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-admin} -d ${POSTGRES_DB:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     labels:
       <<: *default-labels
     logging: *default-logging
@@ -141,10 +153,8 @@ services:
       dockerfile: Dockerfile
     container_name: django
     volumes:
-      - static_volume:/app/staticfiles
+      - ${SHARED_VOLUME_ROOT:-/mnt/shared/mt5}/django/staticfiles:/app/staticfiles
     restart: unless-stopped
-    ports:
-      - 8000:8000
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-postgres}
       POSTGRES_USER: ${POSTGRES_USER:-admin}
@@ -152,7 +162,7 @@ services:
       POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
       POSTGRES_PORT: ${POSTGRES_PORT:-5432}
       MT5_API_URL: ${MT5_API_URL:-http://mt5:5001}
-      DJANGO_DOMAIN: ${DJANGO_DOMAIN:-django.localhost}
+      DJANGO_DOMAIN: ${DJANGO_DOMAIN:-django.irvine.web.id}
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
       CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
     depends_on:
@@ -167,12 +177,12 @@ services:
       traefik.enable: true
       traefik.docker.network: traefik-public
 
-      traefik.http.routers.django-http.rule: Host(`${DJANGO_DOMAIN:-django.localhost}`)
+      traefik.http.routers.django-http.rule: Host(`${DJANGO_DOMAIN:-django.irvine.web.id}`)
       traefik.http.routers.django-http.entrypoints: http
       traefik.http.routers.django-http.middlewares: https-redirect
       traefik.http.routers.django-http.service: django-service
 
-      traefik.http.routers.django-https.rule: Host(`${DJANGO_DOMAIN:-django.localhost}`)
+      traefik.http.routers.django-https.rule: Host(`${DJANGO_DOMAIN:-django.irvine.web.id}`)
       traefik.http.routers.django-https.entrypoints: https
       traefik.http.routers.django-https.tls: true
       traefik.http.routers.django-https.tls.certresolver: le
@@ -180,7 +190,7 @@ services:
 
       traefik.http.services.django-service.loadbalancer.server.port: 8000
 
-      traefik.http.routers.django-static.rule: Host(`${DJANGO_DOMAIN:-django.localhost}`) && PathPrefix(`/static/`)
+      traefik.http.routers.django-static.rule: Host(`${DJANGO_DOMAIN:-django.irvine.web.id}`) && PathPrefix(`/static/`)
       traefik.http.routers.django-static.service: django-service
       traefik.http.middlewares.static-stripprefix.stripprefix.prefixes: /static
       traefik.http.routers.django-static.middlewares: static-stripprefix@docker
@@ -208,7 +218,7 @@ services:
     container_name: celery
     command: celery -A app worker --loglevel=info --concurrency=3
     volumes:
-      - static_volume:/app/staticfiles
+      - ${SHARED_VOLUME_ROOT:-/mnt/shared/mt5}/django/staticfiles:/app/staticfiles
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-postgres}
       POSTGRES_USER: ${POSTGRES_USER:-admin}
@@ -216,7 +226,7 @@ services:
       POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
       POSTGRES_PORT: ${POSTGRES_PORT:-5432}
       MT5_API_URL: ${MT5_API_URL:-http://mt5:5001}
-      DJANGO_DOMAIN: ${DJANGO_DOMAIN:-django.localhost}
+      DJANGO_DOMAIN: ${DJANGO_DOMAIN:-django.irvine.web.id}
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
       CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
     depends_on:
@@ -235,7 +245,7 @@ services:
     container_name: celery-beat
     command: celery -A app beat --loglevel=info
     volumes:
-      - static_volume:/app/staticfiles
+      - ${SHARED_VOLUME_ROOT:-/mnt/shared/mt5}/django/staticfiles:/app/staticfiles
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-postgres}
       POSTGRES_USER: ${POSTGRES_USER:-admin}
@@ -243,7 +253,7 @@ services:
       POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
       POSTGRES_PORT: ${POSTGRES_PORT:-5432}
       MT5_API_URL: ${MT5_API_URL:-http://mt5:5001}
-      DJANGO_DOMAIN: ${DJANGO_DOMAIN:-django.localhost}
+      DJANGO_DOMAIN: ${DJANGO_DOMAIN:-django.irvine.web.id}
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
       CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
     depends_on:
@@ -253,6 +263,111 @@ services:
       - default
     labels:
       <<: *default-labels
+    logging: *default-logging
+
+  quant-api:
+    build:
+      context: .
+      dockerfile: infra/docker/quant-api.Dockerfile
+    container_name: quant-api
+    command: /bin/sh -c "alembic upgrade head && uvicorn apps.api.main:app --host 0.0.0.0 --port 8010"
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://admin:1234@postgres:5432/postgres}
+      MT5_API_BASE_URL: ${MT5_API_BASE_URL:-http://mt5:5001}
+      MT5_API_AUTH_HEADER: ${MT5_API_AUTH_HEADER:-}
+      DEFAULT_SYMBOLS: ${DEFAULT_SYMBOLS:-EURUSD,GBPUSD,USDJPY}
+      DEFAULT_TIMEFRAMES: ${DEFAULT_TIMEFRAMES:-M1,M5,M15}
+      SYMBOL_VISIBLE_ONLY: ${SYMBOL_VISIBLE_ONLY:-true}
+      INCREMENTAL_SYNC_NUM_BARS: ${INCREMENTAL_SYNC_NUM_BARS:-500}
+      HISTORICAL_BACKFILL_CHUNK_MINUTES: ${HISTORICAL_BACKFILL_CHUNK_MINUTES:-1440}
+      PAPER_INITIAL_CASH: ${PAPER_INITIAL_CASH:-100000}
+      INTERNAL_API_PORT: 8010
+    volumes:
+      - ${SHARED_VOLUME_ROOT:-/mnt/shared/mt5}/quant/artifacts:/app/artifacts
+    depends_on:
+      - postgres
+      - mt5
+      - traefik
+    networks:
+      - default
+      - traefik-public
+    labels:
+      <<: *default-labels
+      traefik.enable: true
+      traefik.docker.network: traefik-public
+      traefik.http.routers.quant-api-http.rule: Host(`${QUANT_API_DOMAIN:-quant.irvine.web.id}`)
+      traefik.http.routers.quant-api-http.entrypoints: http
+      traefik.http.routers.quant-api-http.middlewares: https-redirect
+      traefik.http.routers.quant-api-http.service: quant-api
+      traefik.http.routers.quant-api-https.rule: Host(`${QUANT_API_DOMAIN:-quant.irvine.web.id}`)
+      traefik.http.routers.quant-api-https.entrypoints: https
+      traefik.http.routers.quant-api-https.tls: true
+      traefik.http.routers.quant-api-https.tls.certresolver: le
+      traefik.http.services.quant-api.loadbalancer.server.port: 8010
+    logging: *default-logging
+
+  quant-worker:
+    build:
+      context: .
+      dockerfile: infra/docker/quant-worker.Dockerfile
+    container_name: quant-worker
+    command: /bin/sh -c "alembic upgrade head && python -m apps.worker.main scheduler"
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://admin:1234@postgres:5432/postgres}
+      MT5_API_BASE_URL: ${MT5_API_BASE_URL:-http://mt5:5001}
+      MT5_API_AUTH_HEADER: ${MT5_API_AUTH_HEADER:-}
+      DEFAULT_SYMBOLS: ${DEFAULT_SYMBOLS:-EURUSD,GBPUSD,USDJPY}
+      DEFAULT_TIMEFRAMES: ${DEFAULT_TIMEFRAMES:-M1,M5,M15}
+      SYMBOL_VISIBLE_ONLY: ${SYMBOL_VISIBLE_ONLY:-true}
+      INCREMENTAL_SYNC_NUM_BARS: ${INCREMENTAL_SYNC_NUM_BARS:-500}
+      HISTORICAL_BACKFILL_CHUNK_MINUTES: ${HISTORICAL_BACKFILL_CHUNK_MINUTES:-1440}
+      WORKER_SYNC_INTERVAL_SECONDS: ${WORKER_SYNC_INTERVAL_SECONDS:-300}
+      WORKER_BOOTSTRAP_ON_START: ${WORKER_BOOTSTRAP_ON_START:-true}
+      WORKER_INCREMENTAL_ON_START: ${WORKER_INCREMENTAL_ON_START:-true}
+      PAPER_INITIAL_CASH: ${PAPER_INITIAL_CASH:-100000}
+    volumes:
+      - ${SHARED_VOLUME_ROOT:-/mnt/shared/mt5}/quant/artifacts:/app/artifacts
+    depends_on:
+      - postgres
+      - mt5
+    networks:
+      - default
+    labels:
+      <<: *default-labels
+    logging: *default-logging
+
+  web:
+    build:
+      context: .
+      dockerfile: infra/docker/web.Dockerfile
+    container_name: web
+    restart: unless-stopped
+    environment:
+      QUANT_API_URL: ${QUANT_API_URL:-http://quant-api:8010}
+      NODE_ENV: production
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+    depends_on:
+      - quant-api
+      - traefik
+    networks:
+      - default
+      - traefik-public
+    labels:
+      <<: *default-labels
+      traefik.enable: true
+      traefik.docker.network: traefik-public
+      traefik.http.routers.web-http.rule: Host(`${WEB_DOMAIN:-quant-console.irvine.web.id}`)
+      traefik.http.routers.web-http.entrypoints: http
+      traefik.http.routers.web-http.middlewares: https-redirect
+      traefik.http.routers.web-http.service: web
+      traefik.http.routers.web-https.rule: Host(`${WEB_DOMAIN:-quant-console.irvine.web.id}`)
+      traefik.http.routers.web-https.entrypoints: https
+      traefik.http.routers.web-https.tls: true
+      traefik.http.routers.web-https.tls.certresolver: le
+      traefik.http.services.web.loadbalancer.server.port: 3000
     logging: *default-logging
 
   grafana:
@@ -277,12 +392,10 @@ services:
       - ./monitoring/dashboards/log-search.json:/var/lib/grafana/dashboards/log-search.json:ro
       - ./monitoring/dashboards/traefik_official.json:/var/lib/grafana/dashboards/traefik_official.json:ro
       - ./monitoring/dashboards/alertmanager-dashboard.json:/var/lib/grafana/dashboards/alertmanager-dashboard.json:ro
-      - grafana-data:/var/lib/grafana
+      - ${SHARED_VOLUME_ROOT:-/mnt/shared/mt5}/monitoring/grafana:/var/lib/grafana
     depends_on:
       - prometheus
       - traefik
-    ports:
-      - 3000:3000
     cpus: 0.5
     mem_limit: 512m
     networks:
@@ -292,10 +405,14 @@ services:
       <<: *default-labels
       traefik.enable: true
       traefik.docker.network: traefik-public
-      traefik.http.routers.grafana.rule: Host(`${GRAFANA_DOMAIN:-grafana.localhost}`)
-      traefik.http.routers.grafana.entrypoints: https
-      traefik.http.routers.grafana.tls: true
-      traefik.http.routers.grafana.tls.certresolver: le
+      traefik.http.routers.grafana-http.rule: Host(`${GRAFANA_DOMAIN:-grafana.irvine.web.id}`)
+      traefik.http.routers.grafana-http.entrypoints: http
+      traefik.http.routers.grafana-http.middlewares: https-redirect
+      traefik.http.routers.grafana-http.service: grafana
+      traefik.http.routers.grafana-https.rule: Host(`${GRAFANA_DOMAIN:-grafana.irvine.web.id}`)
+      traefik.http.routers.grafana-https.entrypoints: https
+      traefik.http.routers.grafana-https.tls: true
+      traefik.http.routers.grafana-https.tls.certresolver: le
       traefik.http.services.grafana.loadbalancer.server.port: 3000
     logging: *default-logging
 
@@ -315,7 +432,7 @@ services:
       - ./monitoring/configs/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
       - ./monitoring/configs/prometheus/recording-rules.yml:/etc/prometheus/recording-rules.yml
       - ./monitoring/configs/prometheus/alerting-rules.yml:/etc/prometheus/alerting-rules.yml
-      - prometheus-data:/prometheus
+      - ${SHARED_VOLUME_ROOT:-/mnt/shared/mt5}/monitoring/prometheus:/prometheus
     depends_on:
       - alertmanager
       - traefik
@@ -385,6 +502,7 @@ services:
       - "--web.external-url=http://localhost:9093"
     volumes:
       - ./monitoring/configs/alertmanager/alertmanager-fallback-config.yml:/etc/alertmanager/config.yml
+      - ${SHARED_VOLUME_ROOT:-/mnt/shared/mt5}/monitoring/alertmanager:/alertmanager
     ports:
       - 9093:9093
     cpus: 0.5
@@ -423,6 +541,7 @@ services:
     volumes:
       - ./monitoring/configs/loki/loki.yaml:/etc/loki/loki.yaml
       - ./monitoring/configs/loki/rules.yaml:/etc/loki/rules/fake/loki-rules.yml
+      - ${SHARED_VOLUME_ROOT:-/mnt/shared/mt5}/monitoring/loki:/tmp/loki
     depends_on:
       - traefik
     cpus: 0.5
@@ -451,13 +570,6 @@ services:
     labels:
       <<: *default-labels
     logging: *default-logging
-
-volumes:
-  traefik-public-certificates: # Persistent volume for certificates
-  grafana-data: {}
-  prometheus-data: {}
-  postgres-data: {}
-  static_volume: {}
 
 networks:
   default:
