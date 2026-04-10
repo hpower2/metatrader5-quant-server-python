@@ -1,2 +1,0 @@
-"""Worker and CLI entrypoints."""
-

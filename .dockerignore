@@ -1,0 +1,14 @@
+.git
+__pycache__
+.pytest_cache
+.mypy_cache
+.venv
+venv
+env
+ENV
+runs
+artifacts
+*.pyc
+*.pyo
+*.pyd
+*.log

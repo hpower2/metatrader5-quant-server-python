@@ -1,126 +1,222 @@
-# MT5 Quant Research And Paper-Trading Platform
+# Trading Research CLI (Backend-First)
 
-This repository now includes a production-oriented quant pipeline around the existing MetaTrader 5 HTTP API. The upstream MT5 service remains the provider of market data and symbol metadata; a new internal FastAPI service, worker, and TimescaleDB-backed warehouse handle ingestion, data quality, research datasets, backtesting, and paper execution.
+This repository was refactored into a clean, CLI-first trading research system.
 
-The implementation uses the real contract published at `https://api-mt5.irvine.web.id/apispec_1.json`, specifically:
+Note: Docker Compose keeps the MT5 stack with Traefik/MT5/backend/monitoring, and removes `quant-api`, `quant-worker`, and `web` flow services.
 
-- `GET /fetch_data_range`
-- `GET /fetch_data_pos`
-- `GET /symbols/forex`
-- `GET /symbol_info/{symbol}`
-- `GET /symbol_info_tick/{symbol}`
-- `GET /health`
+Core design goals:
 
-## What’s Included
+- no frontend/UI dependency
+- terminal-first operation
+- reproducible config-driven runs
+- leakage-safe time-series workflow
+- honest data sufficiency diagnostics
 
-- MT5 HTTP adapter with typed models, timeout, retries, and `Authorization` header support
-- Symbol bootstrap and metadata cache
-- PostgreSQL + TimescaleDB candle warehouse
-- Historical backfill and incremental sync jobs
-- Data quality auditing for gaps, duplicates, out-of-order bars, and malformed OHLC
-- Reusable feature engineering and label generation modules
-- Dataset builder with parquet export and walk-forward slice generation
-- Signal-driven backtesting foundation
-- Paper-trading scaffold with simulated fills and persisted state
-- FastAPI control plane
-- Next.js operations and research dashboard
-- Alembic migrations
-- Docker Compose integration
-- Pytest coverage for critical logic
+## Repository Layout
 
-## Architecture
+- `app/cli/`
+- `app/config/`
+- `app/data/`
+- `app/features/`
+- `app/datasets/`
+- `app/models/`
+- `app/training/`
+- `app/evaluation/`
+- `app/backtest/`
+- `app/utils/`
+- `configs/`
+- `runs/`
+- `tests/`
+- `docs/migration-plan.md`
 
-The quant layer is organized as:
+## Install
 
-- `apps/api`
-- `apps/worker`
-- `libs/common`
-- `libs/mt5_adapter`
-- `libs/storage`
-- `libs/features`
-- `libs/labels`
-- `libs/datasets`
-- `libs/backtest`
-- `libs/papertrade`
-- `migrations`
-- `infra/docker`
+```bash
+python -m pip install -e .[dev]
+```
 
-The frontend lives at:
+## Shared Volume Convention
 
-- `apps/web`
+For containerized workflows, data and run artifacts are expected under:
 
-Detailed design, assumptions, API ambiguities, schema notes, and workflow behavior live in [docs/architecture.md](/home/irvine/metatrader5-quant-server-python/docs/architecture.md).
-Frontend-specific architecture notes live in [docs/frontend-architecture.md](/home/irvine/metatrader5-quant-server-python/docs/frontend-architecture.md).
+- `/mnt/shared/mt5/data`
+- `/mnt/shared/mt5/runs`
 
-## Quick Start
+In containers, `APP_RUNS_ROOT` defaults to `/mnt/shared/mt5/runs`.
 
-1. Create the environment file.
+## Services Kept
+
+Compose keeps the MT5 operational stack and monitoring/logging stack, including:
+
+- `traefik`
+- `mt5`
+- `postgres`
+- `django`
+- `redis`
+- `celery`
+- `celery-beat`
+- `grafana`
+- `prometheus`
+- `alertmanager`
+- `loki`
+- `promtail`
+- `cadvisor`
+- `node-exporter`
+- `uncomplicated-alert-receiver`
+
+Removed from compose:
+
+- `quant-api`
+- `quant-worker`
+- `web`
+
+## Data Requirements
+
+Input supports CSV/parquet with required fields:
+
+- `timestamp`
+- `open`
+- `high`
+- `low`
+- `close`
+- `volume` (or `tick_volume` / `real_volume`)
+
+`symbol` and `timeframe` are optional; defaults can be provided by CLI flags.
+
+## CLI Commands
+
+### Data quality and sufficiency
+
+```bash
+python -m app data validate --input data/eurusd_1m.csv --default-symbol EURUSD --default-timeframe M1
+python -m app data inspect --input data/eurusd_1m.csv --default-symbol EURUSD --default-timeframe M1
+python -m app data sufficiency --input data/eurusd_1m.csv --window 500 --horizon 60 --default-symbol EURUSD --default-timeframe M1
+```
+
+`data sufficiency` reports:
+
+- total rows, symbols, timeframes, date range
+- missing timestamps, duplicates, NaNs
+- usable windows for `window/horizon/stride`
+- split-adjusted windows
+- walk-forward fold count
+- verdict: `insufficient`, `marginal`, `sufficient`
+- warnings for deep-model sample risk and horizon ambition
+
+### Feature and dataset build
+
+```bash
+python -m app features build --input data/eurusd_1m.csv --output artifacts/features.parquet --default-symbol EURUSD --default-timeframe M1
+python -m app dataset build --input data/eurusd_1m.csv --output-dir artifacts/dataset_bundle --target-mode future_close_return --window 500 --horizon 60 --default-symbol EURUSD --default-timeframe M1
+```
+
+### Config workflow
+
+```bash
+python -m app config validate --config configs/close_return_cnn.yaml
+python -m app train --config configs/close_return_cnn.yaml
+python -m app evaluate --run-id <run_id>
+python -m app evaluate --run-id <run_id> --walk-forward
+python -m app backtest --run-id <run_id>
+python -m app predict --run-id <run_id> --input data/latest.csv
+```
+
+### Run registry
+
+```bash
+python -m app runs list
+python -m app runs show --run-id <run_id>
+```
+
+## Docker Workflow
+
+### Docker Compose (mounted to `/mnt/shared/mt5`)
+
+1. Optional env setup:
 
 ```bash
 cp .env.example .env
 ```
 
-2. Set the MT5 auth header exactly as expected by the upstream service.
-
-```env
-MT5_API_AUTH_HEADER=Bearer your-token-or-api-key
-```
-
-3. Point persistent compose storage at your shared mount.
-
-```env
-SHARED_VOLUME_ROOT=/mnt/shared/mt5
-```
-
-4. Start the stack.
+2. Build and start:
 
 ```bash
-docker compose up -d --build
+make docker-build
+make docker-up
+make docker-ps
 ```
 
-5. The quant control plane will run Alembic migrations automatically on startup and expose endpoints through the `quant-api` service.
-6. The frontend dashboard is exposed through the `web` service and routed by Traefik via `WEB_DOMAIN`.
-
-## Internal Control API
-
-- `GET /health`
-- `GET /sync/status`
-- `POST /sync/run`
-- `GET /symbols`
-- `GET /candles/latest`
-- `POST /features/run`
-- `POST /datasets/build`
-- `POST /backtests/run`
-- `GET /paper/status`
-- `POST /paper/signal`
-
-## Frontend Routes
-
-- `/dashboard`
-- `/market-data`
-- `/features-explorer`
-- `/datasets`
-- `/backtests`
-- `/paper-trading`
-- `/admin`
-
-## Worker Commands
-
-The worker service exposes the same core workflows through a CLI:
+3. Run predefined commands inside container:
 
 ```bash
-python -m apps.worker.main bootstrap-symbols
-python -m apps.worker.main historical-backfill --symbol EURUSD --timeframe M1 --start 2024-01-01T00:00:00Z --end 2024-01-31T00:00:00Z
-python -m apps.worker.main incremental-sync --symbol EURUSD --timeframe M5 --num-bars 500
-python -m apps.worker.main data-quality-audit --symbol EURUSD --timeframe M15
+make docker-data-validate DATA_PATH=/mnt/shared/mt5/data/eurusd_1m.csv
+make docker-data-sufficiency DATA_PATH=/mnt/shared/mt5/data/eurusd_1m.csv
+make docker-train CONFIG_PATH=/workspace/configs/close_return_cnn.yaml
+make docker-runs-list
+make docker-evaluate RUN_ID=<run_id>
+make docker-backtest RUN_ID=<run_id>
+make docker-predict RUN_ID=<run_id> LATEST_PATH=/mnt/shared/mt5/data/latest.csv
 ```
 
-## Notes On Correctness
+4. Open shell:
 
-- Candle timestamps are normalized to UTC.
-- Candle continuity is never assumed; gaps are audited explicitly.
-- OHLC consistency is validated before persistence.
-- Raw payloads and hashes are preserved.
-- Features use current/past rows only.
-- Labels use future rows only.
-- Paper execution is simulated locally; live order endpoints are not part of the primary execution path.
+```bash
+make docker-shell
+```
+
+5. Follow MT5 logs if needed:
+
+```bash
+make docker-mt5-logs
+```
+
+## Target Modes
+
+Supported dataset targets:
+
+- `future_close_return`
+- `future_close_path`
+- `future_ohlc_path`
+- `direction_over_horizon`
+- `tp_before_sl`
+- `mfe_mae`
+
+MVP training focus:
+
+- `future_close_return`
+- `direction_over_horizon`
+- `tp_before_sl`
+
+## Models
+
+- `mlp`
+- `cnn1d`
+- `gru`
+
+## Leakage Controls
+
+- strictly chronological split
+- optional split gap between train/validation/test
+- no random shuffling for split
+- feature scaler fit on train only
+- scaler reused unchanged on validation/test/predict
+
+## Run Artifacts
+
+Each run writes into `runs/<run_id>/`:
+
+- `config.yaml`
+- `run_manifest.json`
+- `training_summary.json`
+- `training_history.json`
+- `dataset/` bundle (`dataset.npz`, `sample_metadata.parquet`, `metadata.json`, `scaler.pkl`)
+- `checkpoints/best.pt`
+- `evaluation/<split>/metrics.json`
+- `evaluation/<split>/predictions.parquet`
+- `backtest/<split>/metrics.json`
+
+## Important Note On Sufficiency
+
+If data is too short for `window=500` and `horizon=60`, CLI reports insufficiency explicitly.
+This is intentional: weak data quality or weak sample count is never hidden by optimistic defaults.
+

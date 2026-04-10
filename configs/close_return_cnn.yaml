@@ -1,0 +1,54 @@
+run_name: close_return_cnn
+data:
+  input_path: data/eurusd_1m.csv
+  default_symbol: EURUSD
+  default_timeframe: M1
+features:
+  rolling_vol_window: 20
+  atr_window: 14
+  ema_window: 20
+  include_ema_distance: true
+dataset:
+  window: 500
+  horizon: 60
+  stride: 1
+  target_mode: future_close_return
+  direction_threshold: 0.0
+  tp_pct: 0.003
+  sl_pct: 0.002
+split:
+  train_ratio: 0.7
+  validation_ratio: 0.15
+  test_ratio: 0.15
+  gap: 60
+walk_forward:
+  enabled: true
+  train_windows: 3000
+  validation_windows: 1000
+  test_windows: 1000
+  step_windows: 500
+  max_folds: 5
+model:
+  name: cnn1d
+  hidden_dim: 128
+  num_layers: 2
+  dropout: 0.1
+  cnn_channels: 64
+  cnn_kernel_size: 5
+  gru_hidden_size: 96
+  gru_num_layers: 2
+training:
+  batch_size: 128
+  epochs: 40
+  learning_rate: 0.001
+  weight_decay: 0.00001
+  early_stopping_patience: 8
+  seed: 42
+  device: auto
+  num_workers: 0
+backtest:
+  signal_threshold: 0.0005
+  probability_threshold: 0.55
+  fee_bps: 1.0
+  spread_bps: 0.5
+  slippage_bps: 0.5

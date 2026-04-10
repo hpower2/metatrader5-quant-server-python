@@ -1,0 +1,31 @@
+run_name: direction_gru
+data:
+  input_path: data/eurusd_1m.csv
+  default_symbol: EURUSD
+  default_timeframe: M1
+dataset:
+  window: 500
+  horizon: 60
+  stride: 1
+  target_mode: direction_over_horizon
+  direction_threshold: 0.0001
+  tp_pct: 0.003
+  sl_pct: 0.002
+model:
+  name: gru
+  hidden_dim: 128
+  num_layers: 2
+  dropout: 0.1
+  cnn_channels: 64
+  cnn_kernel_size: 5
+  gru_hidden_size: 96
+  gru_num_layers: 2
+training:
+  batch_size: 128
+  epochs: 35
+  learning_rate: 0.001
+  weight_decay: 0.00001
+  early_stopping_patience: 8
+  seed: 42
+  device: auto
+  num_workers: 0
